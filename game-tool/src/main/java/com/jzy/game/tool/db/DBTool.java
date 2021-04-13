@@ -15,12 +15,7 @@ import com.jzy.game.tool.util.StringUtil;
 import com.mongodb.MongoClient;
 import com.mongodb.MongoClientURI;
 import java.io.File;
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.Optional;
-import java.util.Vector;
+import java.util.*;
 import java.util.logging.Level;
 import javax.swing.DefaultComboBoxModel;
 import javax.swing.JFileChooser;
@@ -199,14 +194,18 @@ public class DBTool extends javax.swing.JFrame {
                 LOGGER.error("更新数据", e);
             }
         });
-        mongoClient.close();
-        //加载服务器配置
-        String loadConfigUrl = getDBConfig().getLoadConfigUrl();
-        if(loadConfigUrl!=null&&!loadConfigUrl.equalsIgnoreCase("")){
-            String log = HttpUtil.URLGet(loadConfigUrl);
-            logTextArea.append("游戏服-"+getDBConfig().getDbName()+log+"更新配置成功\r\n");
+        if(mongoClient!=null){
+            mongoClient.close();
         }
-        
+        //加载服务器配置
+       // String loadConfigUrl = getDBConfig().getLoadConfigUrl();
+        List<String> loadConfigUrls = getDBConfig().getLoadConfigUrls();
+        for (String loadConfigUrl:loadConfigUrls){
+            if(loadConfigUrl!=null&&!loadConfigUrl.equalsIgnoreCase("")){
+                String log = HttpUtil.URLGet(loadConfigUrl);
+                logTextArea.append("游戏服-"+getDBConfig().getDbName()+" "+loadConfigUrl+":"+log+"更新配置成功\r\n");
+            }
+        }
     }//GEN-LAST:event_insertDataBtnActionPerformed
 
     private void exitMenuItemActionPerformed(java.awt.event.ActionEvent evt) {//GEN-FIRST:event_exitMenuItemActionPerformed
@@ -236,8 +235,12 @@ public class DBTool extends javax.swing.JFrame {
         }
         selectSheets.forEach(sheetName -> {
             try {
-                Args.Three<List<String>, List<String>, List<String>> metaData = ExcelUtil.getMetaData(sheetNameFiles.get(sheetName).getAbsolutePath(), sheetName);
+                Args.Four<List<String>, List<String>, List<String>,List<String>> metaData = ExcelUtil.getMetaData(sheetNameFiles.get(sheetName).getAbsolutePath(), sheetName);
                 for(int i=0;i<metaData.a().size();i++){
+                    //不显示客户端字段
+                    if("client".equalsIgnoreCase(metaData.d().get(i))){
+                        continue;
+                    }
                     StringBuilder sb=new StringBuilder();
                     sb.append("/**").append(metaData.c().get(i)).append("*/").append("\r\n");
                     sb.append("private ");
@@ -255,7 +258,10 @@ public class DBTool extends javax.swing.JFrame {
                 LOGGER.error("更新数据", e);
             }
         });
-        mongoClient.close();
+        if (mongoClient!=null){
+            mongoClient.close();
+        }
+
     }//GEN-LAST:event_javaFieldBtnActionPerformed
 
     private void clearLogBtnActionPerformed(java.awt.event.ActionEvent evt) {//GEN-FIRST:event_clearLogBtnActionPerformed
@@ -348,8 +354,8 @@ public class DBTool extends javax.swing.JFrame {
      */
     public void setSheetList(String filePath) {
         List<File> excelFiles = new ArrayList<>();
-        FileUtil.getFiles(filePath, excelFiles, ExcelUtil.xls, null);
-        FileUtil.getFiles(filePath, excelFiles, ExcelUtil.xlsx, null);
+        FileUtil.getFiles(filePath, excelFiles, ExcelUtil.xls,null);
+        FileUtil.getFiles(filePath, excelFiles, ExcelUtil.xlsx,null);
         Vector sheetNames = new Vector();
         sheetNameFiles.clear();
         sheetJList.removeAll();
@@ -358,14 +364,17 @@ public class DBTool extends javax.swing.JFrame {
             try {
                 List<String> sheets = ExcelUtil.getSheetNames(absolutePath);
                 if (sheets != null) {
-                    sheets.forEach(name -> sheetNameFiles.put(name, file));
-                    sheetNames.addAll(sheets);
+                    sheets.stream().filter(it->it.startsWith("config")).forEach(name -> {
+                        sheetNameFiles.put(name, file);
+                        sheetNames.add(name);
+                    });
                 }
             } catch (Exception ex) {
                 java.util.logging.Logger.getLogger(DBTool.class.getName()).log(Level.SEVERE, null, ex);
             }
         });
         if (sheetNames.size() > 0) {
+            Collections.sort(sheetNames);
             sheetJList.setListData(sheetNames);
         } else {
             logTextArea.append("未找到默认表，\r\n");

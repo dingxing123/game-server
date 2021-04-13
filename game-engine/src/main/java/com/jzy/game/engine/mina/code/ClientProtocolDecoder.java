@@ -24,15 +24,16 @@ import com.jzy.game.engine.util.MsgUtil;
 
 /**
  * 游戏客户端消息解码
- * 
+ *
  * <p>
  * 包长度（2）+消息ID（4）+消息长度（4）+消息内容 <br>
  * 返回byte数组已去掉包长度
  * </p>
  * TODO 加解密
- * 
+ *
  * @author JiangZhiYong
  * @QQ 359135103
+ * @version $Id: $Id
  */
 public class ClientProtocolDecoder extends ProtocolDecoderImpl {
 
@@ -41,14 +42,20 @@ public class ClientProtocolDecoder extends ProtocolDecoderImpl {
 	private static final String START_TIME = "start_time"; // 消息开始时间
 	private static final String RECEIVE_COUNT = "receive_count";// 消息接收次数
 
+	/** Constant <code>AES_KEY</code> */
 	public static final byte[] AES_KEY = "vWf7g1Gt701h0.#0".getBytes();
+	/** Constant <code>AES_IV</code> */
 	public static final byte[] AES_IV = "rgnHV16#8HQFc&16".getBytes();
 
 	private int maxCountPerSecond = 100; // 每秒钟最大接收消息数
 
+	/**
+	 * <p>Constructor for ClientProtocolDecoder.</p>
+	 */
 	public ClientProtocolDecoder() {
 	}
 
+	/** {@inheritDoc} */
 	@Override
 	protected boolean doDecode(IoSession session, IoBuffer in, ProtocolDecoderOutput out) throws Exception {
 		int readAbleLen = in.remaining();
@@ -104,7 +111,6 @@ public class ClientProtocolDecoder extends ProtocolDecoderImpl {
 	 * @param bytes
 	 *            消息Id(4字节)+protobufLength(4字节)+消息体+时间戳(8字节)+签名数据长度(4字节)+签名数据+截取签名长度(4字节)
 	 * @param protobufLength
-	 * @param out
 	 */
 	private boolean checkMsgSign(byte[] bytes, int protobufLength) throws Exception {
 		// 客户端时间戳
@@ -146,8 +152,11 @@ public class ClientProtocolDecoder extends ProtocolDecoderImpl {
 
 	/**
 	 * AES解密
-	 * 
+	 *
 	 * @author codingtony 2017年5月23日下午6:14:09
+	 * @param bytes an array of {@link byte} objects.
+	 * @return an array of {@link byte} objects.
+	 * @throws java.lang.Exception if any.
 	 */
 	public static byte[] decryptAES(byte[] bytes) throws Exception {
 		try {
@@ -195,10 +204,20 @@ public class ClientProtocolDecoder extends ProtocolDecoderImpl {
 		return true;
 	}
 
+	/**
+	 * <p>Getter for the field <code>maxCountPerSecond</code>.</p>
+	 *
+	 * @return a int.
+	 */
 	public int getMaxCountPerSecond() {
 		return maxCountPerSecond;
 	}
 
+	/**
+	 * <p>Setter for the field <code>maxCountPerSecond</code>.</p>
+	 *
+	 * @param maxCountPerSecond a int.
+	 */
 	public void setMaxCountPerSecond(int maxCountPerSecond) {
 		this.maxCountPerSecond = maxCountPerSecond;
 	}

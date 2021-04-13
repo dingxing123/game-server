@@ -5,6 +5,7 @@ import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.mongodb.DBObject;
+
 import java.io.FileInputStream;
 import java.io.IOException;
 import java.io.InputStream;
@@ -13,10 +14,7 @@ import java.util.Date;
 import java.util.List;
 
 import org.apache.poi.hssf.usermodel.HSSFWorkbook;
-import org.apache.poi.ss.usermodel.Cell;
-import org.apache.poi.ss.usermodel.Row;
-import org.apache.poi.ss.usermodel.Sheet;
-import org.apache.poi.ss.usermodel.Workbook;
+import org.apache.poi.ss.usermodel.*;
 import org.apache.poi.xssf.usermodel.XSSFWorkbook;
 import org.bson.Document;
 import org.slf4j.Logger;
@@ -38,40 +36,62 @@ public class ExcelUtil {
      *
      * @param filePath
      * @param sheetName
-     * @return 属性名称列表、字段类型、描述说明，数据内容
+     * @return 属性名称列表、字段类型、描述说明，数据内容,排查信息
      */
-    public static Args.Four<List<String>, List<String>, List<String>, List<List<Object>>> readExcel(String filePath, String sheetName) throws Exception {
+    public static Args.Five<List<String>, List<String>, List<String>, List<List<Object>>, List<String>> readExcel(String filePath, String sheetName) throws Exception {
         Workbook workBook = getWorkBook(filePath);
         if (workBook == null) {
+            LOGGER.warn("路径：{} excel不存在", filePath);
             return null;
         }
         Sheet sheet = workBook.getSheet(sheetName);
         if (sheet == null) {
+            LOGGER.warn("路径：{}表单{}不存在", filePath, sheetName);
             return null;
         }
 
         List<String> fieldList = new ArrayList<>();
         List<String> typeList = new ArrayList<>();
         List<String> descList = new ArrayList<>();
+        List<String> columnSelectTypeList = new ArrayList<>();
 
-        //前三行为元数据
-        for (int i = 0; i < 3; i++) {
+        //前五行为元数据
+        //1行：客户端元数据
+        //2行：客户端|服务器标识行 common|server|client
+        //3行：字段名称
+        //4行：字段数据类型
+        //5行：字段说明
+        for (int i = 0; i < 5; i++) {
             Row row = sheet.getRow(i);
             if (row == null) {
                 continue;
             }
+            //1行：客户端元数据,忽略
+            if (i == 0) {
+                continue;
+            }
             int lastCellNum = row.getPhysicalNumberOfCells();
             for (int j = 0; j < lastCellNum; j++) {
-                String value = row.getCell(j).toString();
+                String value = "";
+                try {
+                    value = row.getCell(j).toString();
+                } catch (NullPointerException e) {
+                    throw new IllegalStateException(String.format("表单%s 表头 %d行%d列数据为空", sheetName, i, j));
+                }
+
                 switch (i) {
-                    case 0:
+                    case 1:
+                        columnSelectTypeList.add(value);
+                        break;
+                    case 2:
                         fieldList.add(value);
                         break;
-                    case 1:
+                    case 3:
                         typeList.add(value);
                         break;
-                    default:
+                    case 4:
                         descList.add(value);
+                    default:
                         break;
                 }
             }
@@ -79,33 +99,58 @@ public class ExcelUtil {
         //数据
         List<List<Object>> dataList = new ArrayList<>();
         int lastRowNum = sheet.getLastRowNum();
-        for (int i = 3; i <= lastRowNum; i++) {
+        for (int i = 5; i <= lastRowNum; i++) {
             Row row = sheet.getRow(i);
             if (row == null) {
-                return null;
+                continue;
             }
             //int lastCellNum = row.getPhysicalNumberOfCells();
             int lastCellNum = fieldList.size();
             List<Object> datas = new ArrayList<>();
+            Cell firstColumn = row.getCell(0);
+            if (firstColumn == null) {
+                continue;
+            }
+            //第一列#开头表示注释行
+            firstColumn.setCellType(CellType.STRING); //强制设置为字符串
+            if (firstColumn.getStringCellValue().startsWith("#")) {
+                continue;
+            }
+            if ("".equalsIgnoreCase(firstColumn.getStringCellValue())) {
+                LOGGER.warn("{} {}-{} 有空行或者id未设值，跳过读取", sheetName, i + 1, 1);
+                continue;
+            }
+
             for (int j = 0; j < lastCellNum; j++) {
                 Cell cell = row.getCell(j);
-                Object object = getCellValue(cell, typeList.get(j));
-                datas.add(object);
+                try {
+                    Object object;
+                    //跳过解析客户端数据
+                    if ("client".equalsIgnoreCase(columnSelectTypeList.get(j))) {
+                        object = cell == null ? "" : cell.toString();
+                    } else {
+                        object = getCellValue(cell, typeList.get(j));
+                    }
+
+                    datas.add(object);
+                } catch (Exception e) {
+                    LOGGER.error(String.format("%d-%d 数据读取错误", i + 1, j + 1), e);
+                }
             }
             dataList.add(datas);
         }
 
         workBook.close();
-        return Args.of(fieldList, typeList, descList, dataList);
+        return Args.of(fieldList, typeList, descList, dataList, columnSelectTypeList);
     }
 
     /**
      * 获取表头元数据
      *
      * @param filePath
-     * @return 属性名称列表、字段类型、描述说明
+     * @return 属性名称列表、字段类型、描述说明、客户端服务器字段标识
      */
-    public static Args.Three<List<String>, List<String>, List<String>> getMetaData(String filePath, String sheetName) throws Exception {
+    public static Args.Four<List<String>, List<String>, List<String>, List<String>> getMetaData(String filePath, String sheetName) throws Exception {
         Workbook workBook = getWorkBook(filePath);
         if (workBook == null) {
             return null;
@@ -118,9 +163,15 @@ public class ExcelUtil {
         List<String> fieldList = new ArrayList<>();
         List<String> typeList = new ArrayList<>();
         List<String> descList = new ArrayList<>();
+        List<String> serverClientColumnList = new ArrayList<>();
 
-        //前三行为元数据
-        for (int i = 0; i < 3; i++) {
+        //前五行为元数据
+        //1行：客户端元数据
+        //2行：客户端|服务器标识行 common|server|client
+        //3行：字段名称
+        //4行：字段数据类型
+        //5行：字段说明
+        for (int i = 1; i < 5; i++) {
             Row row = sheet.getRow(i);
             if (row == null) {
                 continue;
@@ -129,20 +180,25 @@ public class ExcelUtil {
             for (int j = 0; j < lastCellNum; j++) {
                 String value = row.getCell(j).toString();
                 switch (i) {
-                    case 0:
+                    case 1:
+                        serverClientColumnList.add(value);
+                        break;
+                    case 2:
                         fieldList.add(value);
                         break;
-                    case 1:
+                    case 3:
                         typeList.add(value);
                         break;
-                    default:
+                    case 4:
                         descList.add(value);
+                        break;
+                    default:
                         break;
                 }
             }
         }
         workBook.close();
-        return Args.of(fieldList, typeList, descList);
+        return Args.of(fieldList, typeList, descList, serverClientColumnList);
     }
 
     /**
@@ -166,7 +222,7 @@ public class ExcelUtil {
             }
             workBook.close();
         } catch (Exception e) {
-            LOGGER.error("获取sheet名称", e);
+            LOGGER.error(String.format("获取 %s sheet名称", filePath), e);
         }
         return sheetNames;
     }
@@ -218,12 +274,15 @@ public class ExcelUtil {
                     return 0;
                 case "float":
                 case "double":
+                case "number": //lua中只有number
                     return 0.0;
                 case "array":
                     return new ArrayList<Document>();
                 case "object":
+                case "json":
                     return new Document();
                 case "boolean":
+                case "bool":
                     return false;
                 default:
                     return cellValue;
@@ -267,16 +326,29 @@ public class ExcelUtil {
             return Short.parseShort(cellValue);
         } else if ("Date".equalsIgnoreCase(type)) {
             return new Date(cellValue);
-        } else if ("boolean".equalsIgnoreCase(type)) {
+        } else if ("boolean".equalsIgnoreCase(type) || "bool".equalsIgnoreCase(type)) {
             return Boolean.parseBoolean(cellValue);
         } else if ("float".equalsIgnoreCase(type)) {
             return Float.parseFloat(cellValue);
-        } else if ("double".equalsIgnoreCase(type)) {
+            //lua number默认为double类型
+        } else if ("double".equalsIgnoreCase(type) || "number".equalsIgnoreCase(cellValue)) {
             return Double.parseDouble(cellValue);
         } else if ("array".equalsIgnoreCase(type)) {
             return MongoUtil.getDocuments(cellValue);
-        } else if ("object".equalsIgnoreCase(type)) {
+        } else if ("object".equalsIgnoreCase(type) || "json".equalsIgnoreCase(type)) {
             return MongoUtil.getDocument(cellValue);
+            //指定类型数组需要自己组装中括号 1,2
+        } else if ("string[]".equalsIgnoreCase(type) || "int[]".equalsIgnoreCase(type)
+                || "bool[]".equalsIgnoreCase(type) || "double".equalsIgnoreCase(type)) {
+            StringBuilder sb = new StringBuilder("[");
+            sb.append(cellValue);
+            sb.append("]");
+            return MongoUtil.getDocuments(cellValue);
+        } else if ("long[]".equalsIgnoreCase(type) || "float[]".equalsIgnoreCase(type)) {
+            StringBuilder sb = new StringBuilder("[");
+            sb.append(cellValue);
+            sb.append("]");
+            return MongoUtil.getDocuments(cellValue, type);
         }
 
         return cellValue;
